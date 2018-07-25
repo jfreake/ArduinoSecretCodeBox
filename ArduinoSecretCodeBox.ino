@@ -15,6 +15,7 @@
   created 2018-07-21
   modified 2018-07-21
   by Jason Freake (jfreake@iframe.ca)
+  https://github.com/jfreake/ArduinoSecretCodeBox
 */
 
 // Includes
@@ -31,8 +32,8 @@ const int  tonePin        = 10;  // the digital pin that is connected to the ton
 const int  servoPin       = 14;  // the analog pin pin that controls the lock servo motor
 const int  melodyAry[]    = { NOTE_E5, NOTE_E5, 0, NOTE_E5, 0, NOTE_C5, NOTE_E5, 0, NOTE_G5, 0, 0, 0, NOTE_G4 }; // array of notes to be played
 const int  durationAry[]  = { 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8 };                                           // array of duration of notes to be played
-const String  patternB    = "brbbrr";
-const String  patternR    = "rbrrbb";
+const String  patternB    = "brbbrr";  // Target pattern starting with the left/black button
+const String  patternR    = "rbrrbb";  // Target pattern starting with the right/red button
 Servo mainServo;
 
 // Variables will change:
@@ -44,7 +45,7 @@ int lastRedState       = HIGH;   // previous state of the red button
 String currentChar       = "";   // the char associated with the current button press
 String currentPattern    = "";   // holds the current pattern being assembled
 bool locked            = true;   // holds the value that states if the box should currently be locked
-bool throwError       = false;   // holds
+bool throwError       = false;   // used to trigger an error and reset of the current pattern
 
 
 
@@ -69,7 +70,7 @@ void setup() {
   Serial.println("LEDs initialized");
 
 
-  Serial.println("Playing startup tune"); 
+  Serial.println("Playing startup tune...It's-a-Me"); 
   // iterate over the notes of the melody:
   for (int thisNote = 0; thisNote < 13; thisNote++) {
 
@@ -79,7 +80,7 @@ void setup() {
     if ( melodyAry[thisNote] != 0 ){
       analogWrite(ledGreenPin, 255); // Blink with the tune
     }
-    // tone(tonePin, melodyAry[thisNote], noteDuration);
+    tone(tonePin, melodyAry[thisNote], noteDuration);
 
 
     // to distinguish the notes, set a minimum time between them.
@@ -92,10 +93,11 @@ void setup() {
     noTone(tonePin);
   }
 
-  
+  // Lock the Box and detach so it's not using power
   Serial.println("Locking Box");
-  analogWrite(ledRedPin, 64);
+  analogWrite(ledRedPin, 255);
   mainServo.write(0);
+  // Wait half a sec for the motor to get to it's position
   delay(500);
   mainServo.detach(); 
 
@@ -127,54 +129,84 @@ void loop() {
       }
     }
 
+    // If one of the buttons were pressed, start the evaluation of the pattern
     if (currentChar != ""){
+      // If we are coming off of a successful lock, relock everything and reset if another button has been pressed.
+      if (locked == false){
+      Serial.println("Re-Locking");
+      mainServo.attach(servoPin);
+      mainServo.write(0);
+      delay(500);
+      mainServo.detach();  
+      locked = true;
+      }
+      
       // light up light
+      analogWrite(ledRedPin, 0);
       analogWrite(ledGreenPin, 255);
       // Beep
       tone(tonePin, NOTE_G5, 1000/128);
-      
+      analogWrite(ledGreenPin, 0);
+
+      // Increment the button count
       buttonPressCounter++;
+
+      // Append button press to the current pattern
       currentPattern = currentPattern + String(currentChar);
       Serial.println(String(currentChar) + " button pressed");
       Serial.println("matching number " + String(buttonPressCounter) + " in pattern ");
       Serial.println("Current pattern:" + String(currentPattern));
 
-      //Check pattern matches
+      //Check if current pattern matches either target pattern
       if(patternB.startsWith(currentPattern)|| patternR.startsWith(currentPattern)){
-        // all good
+        // all good...lets keep going
         Serial.println("All Good");
       }else{
+        //nope...it didn't match, set the trigger to reset and start over
         throwError = true;
       }
 
+      // reset and start over
       if (throwError == true){
         Serial.println("ERROR...resetting");
-        tone(tonePin, NOTE_G4, 1000/32);
-        delay(1000/32);
-        tone(tonePin, NOTE_G4, 1000/32);
-        delay(1000/32);
-        tone(tonePin, NOTE_G4, 500);
+        analogWrite(ledRedPin, 255);
+        tone(tonePin, NOTE_G4, 1000/16);
+        delay(1000/16);
+        analogWrite(ledRedPin, 0);
+        delay(1000/16);
+        analogWrite(ledRedPin, 255);
+        tone(tonePin, NOTE_G4, 1000/16);
+        delay(1000/16);
+        analogWrite(ledRedPin, 0);
+        delay(1000/16);
+        analogWrite(ledRedPin, 255);
+        tone(tonePin, NOTE_G4, 1000/2);
         currentPattern = "";
         buttonPressCounter = 0;
         throwError = false;
       }
 
+      // Check to see if current pattern matches fully and set unlock variable if so.
       if (patternR == currentPattern || patternB == currentPattern){
         locked = false;
       }
 
+      // Congrats...you unlocked the box with one of the target patterns
       if (locked == false /* pattern is matched */){
+        analogWrite(ledRedPin, 0);
+        analogWrite(ledGreenPin, 255);
         Serial.println("Open Lock");
         mainServo.attach(servoPin);
         mainServo.write(128);
         delay(500);
         mainServo.detach();
-        locked == true;
+        currentPattern = "";
+        buttonPressCounter = 0;
+        throwError = false;
       }
     } else {
       // if the current state is LOW then the button went from on to off:
       Serial.println("button released");
-      analogWrite(ledGreenPin, 0);
     }
     // Delay a little bit to avoid bouncing
     delay(150);
@@ -188,3 +220,6 @@ void loop() {
   lastBlackState = buttonBlackState;
   lastRedState = buttonRedState;  
 }
+
+// This was fun...thanks to Mr. Streeter at https://www.creativekids.info/ for the challenge and the materials.
+// This was my first experience with an Arduino board and it won't be my last.
